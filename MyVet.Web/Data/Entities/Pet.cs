@@ -32,6 +32,7 @@ namespace MyVet.Web.Data.Entities
         public string Remarks { get; set; }
 
         public ICollection<History> Histories { get; set; }
+        public ICollection<Agenda> Agendas { get; set; }
 
         public string ImageFullPath => string.IsNullOrEmpty(ImageUrl)
             ? null
