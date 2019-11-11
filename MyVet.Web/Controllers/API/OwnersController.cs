@@ -52,7 +52,7 @@ namespace MyVet.Web.Controllers.API
                 {
                     Born = p.Born,
                     Id = p.Id,
-                    ImageUrl = p.ImageFullPath,
+                    ImageUrl = p.ImagePath,
                     Name = p.Name,
                     Race = p.Race,
                     Remarks = p.Remarks,

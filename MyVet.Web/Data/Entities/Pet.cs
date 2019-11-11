@@ -34,9 +34,15 @@ namespace MyVet.Web.Data.Entities
         public ICollection<History> Histories { get; set; }
         public ICollection<Agenda> Agendas { get; set; }
 
-        public string ImageFullPath => string.IsNullOrEmpty(ImageUrl)
-            ? null
-            : $"https://cadearaujo.com{ImageUrl.Substring(1)}";
+        public string ImagePath
+        {
+            get
+            {
+                return string.IsNullOrEmpty(ImageUrl)
+                    ? null
+                    : $"https://cadearaujo.com{ImageUrl.Substring(1)}";
+            }
+        }
     }
 
 }

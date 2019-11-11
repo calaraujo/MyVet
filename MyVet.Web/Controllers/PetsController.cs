@@ -1,30 +1,39 @@
-﻿using Microsoft.AspNetCore.Authorization;
+﻿using System;
+using System.IO;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using MyVet.Web.Data;
 using MyVet.Web.Data.Entities;
-using System.Linq;
-using System.Threading.Tasks;
+using MyVet.Web.Helpers;
+using MyVet.Web.Models;
 
 namespace MyVet.Web.Controllers
 {
     [Authorize(Roles = "Admin")]
     public class PetsController : Controller
     {
-        private readonly DataContext _context;
+        private readonly ICombosHelper _combosHelper;
+        private readonly DataContext _dataContext;
 
-        public PetsController(DataContext context)
+        public PetsController(
+            ICombosHelper combosHelper,
+            DataContext dataContext)
         {
-            _context = context;
+            _combosHelper = combosHelper;
+            _dataContext = dataContext;
         }
 
-        // GET: Pets
-        public async Task<IActionResult> Index()
+        public IActionResult Index()
         {
-            return View(await _context.Pets.ToListAsync());
+            return View(_dataContext.Pets
+                .Include(p => p.Owner)
+                .ThenInclude(o => o.User)
+                .Include(p => p.PetType)
+                .Include(p => p.Histories));
         }
 
-        // GET: Pets/Details/5
         public async Task<IActionResult> Details(int? id)
         {
             if (id == null)
@@ -32,8 +41,12 @@ namespace MyVet.Web.Controllers
                 return NotFound();
             }
 
-            var pet = await _context.Pets
-                .FirstOrDefaultAsync(m => m.Id == id);
+            var pet = await _dataContext.Pets
+                .Include(p => p.Owner)
+                .ThenInclude(o => o.User)
+                .Include(p => p.Histories)
+                .ThenInclude(h => h.ServiceType)
+                .FirstOrDefaultAsync(o => o.Id == id.Value);
             if (pet == null)
             {
                 return NotFound();
@@ -42,29 +55,6 @@ namespace MyVet.Web.Controllers
             return View(pet);
         }
 
-        // GET: Pets/Create
-        public IActionResult Create()
-        {
-            return View();
-        }
-
-        // POST: Pets/Create
-        // To protect from overposting attacks, please enable the specific properties you want to bind to, for 
-        // more details see http://go.microsoft.com/fwlink/?LinkId=317598.
-        [HttpPost]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Create([Bind("Id,Name,ImageUrl,Race,Born,Remarks")] Pet pet)
-        {
-            if (ModelState.IsValid)
-            {
-                _context.Add(pet);
-                await _context.SaveChangesAsync();
-                return RedirectToAction(nameof(Index));
-            }
-            return View(pet);
-        }
-
-        // GET: Pets/Edit/5
         public async Task<IActionResult> Edit(int? id)
         {
             if (id == null)
@@ -72,50 +62,77 @@ namespace MyVet.Web.Controllers
                 return NotFound();
             }
 
-            var pet = await _context.Pets.FindAsync(id);
+            var pet = await _dataContext.Pets
+                .Include(p => p.Owner)
+                .Include(p => p.PetType)
+                .FirstOrDefaultAsync(p => p.Id == id.Value);
             if (pet == null)
             {
                 return NotFound();
             }
-            return View(pet);
+
+            var view = new PetViewModel
+            {
+                Born = pet.Born,
+                Id = pet.Id,
+                ImageUrl = pet.ImageUrl,
+                Name = pet.Name,
+                OwnerId = pet.Owner.Id,
+                PetTypeId = pet.PetType.Id,
+                PetTypes = _combosHelper.GetComboPetTypes(),
+                Race = pet.Race,
+                Remarks = pet.Remarks
+            };
+
+            return View(view);
         }
 
-        // POST: Pets/Edit/5
-        // To protect from overposting attacks, please enable the specific properties you want to bind to, for 
-        // more details see http://go.microsoft.com/fwlink/?LinkId=317598.
         [HttpPost]
         [ValidateAntiForgeryToken]
-        public async Task<IActionResult> Edit(int id, [Bind("Id,Name,ImageUrl,Race,Born,Remarks")] Pet pet)
+        public async Task<IActionResult> Edit(PetViewModel view)
         {
-            if (id != pet.Id)
-            {
-                return NotFound();
-            }
-
             if (ModelState.IsValid)
             {
-                try
+                var path = view.ImageUrl;
+
+                if (view.ImageFile != null && view.ImageFile.Length > 0)
                 {
-                    _context.Update(pet);
-                    await _context.SaveChangesAsync();
+                    var guid = Guid.NewGuid().ToString();
+                    var file = $"{guid}.jpg";
+
+                    path = Path.Combine(
+                        Directory.GetCurrentDirectory(),
+                        "wwwroot\\images\\Pets",
+                        file);
+
+                    using (var stream = new FileStream(path, FileMode.Create))
+                    {
+                        await view.ImageFile.CopyToAsync(stream);
+                    }
+
+                    path = $"~/images/Pets/{file}";
                 }
-                catch (DbUpdateConcurrencyException)
+
+                var pet = new Pet
                 {
-                    if (!PetExists(pet.Id))
-                    {
-                        return NotFound();
-                    }
-                    else
-                    {
-                        throw;
-                    }
-                }
+                    Born = view.Born,
+                    Id = view.Id,
+                    ImageUrl = path,
+                    Name = view.Name,
+                    Owner = await _dataContext.Owners.FindAsync(view.OwnerId),
+                    PetType = await _dataContext.PetTypes.FindAsync(view.PetTypeId),
+                    Race = view.Race,
+                    Remarks = view.Remarks
+                };
+
+                _dataContext.Pets.Update(pet);
+                await _dataContext.SaveChangesAsync();
                 return RedirectToAction(nameof(Index));
             }
-            return View(pet);
+
+            return View(view);
         }
 
-        // GET: Pets/Delete/5
         public async Task<IActionResult> Delete(int? id)
         {
             if (id == null)
@@ -123,30 +140,134 @@ namespace MyVet.Web.Controllers
                 return NotFound();
             }
 
-            var pet = await _context.Pets
+            var pet = await _dataContext.Pets
                 .FirstOrDefaultAsync(m => m.Id == id);
             if (pet == null)
             {
                 return NotFound();
             }
 
-            return View(pet);
-        }
-
-        // POST: Pets/Delete/5
-        [HttpPost, ActionName("Delete")]
-        [ValidateAntiForgeryToken]
-        public async Task<IActionResult> DeleteConfirmed(int id)
-        {
-            var pet = await _context.Pets.FindAsync(id);
-            _context.Pets.Remove(pet);
-            await _context.SaveChangesAsync();
+            _dataContext.Pets.Remove(pet);
+            await _dataContext.SaveChangesAsync();
             return RedirectToAction(nameof(Index));
         }
 
-        private bool PetExists(int id)
+        public async Task<IActionResult> DeleteHistory(int? id)
         {
-            return _context.Pets.Any(e => e.Id == id);
+            if (id == null)
+            {
+                return NotFound();
+            }
+
+            var history = await _dataContext.Histories
+                .Include(h => h.Pet)
+                .FirstOrDefaultAsync(h => h.Id == id.Value);
+            if (history == null)
+            {
+                return NotFound();
+            }
+
+            _dataContext.Histories.Remove(history);
+            await _dataContext.SaveChangesAsync();
+            return RedirectToAction($"{nameof(Details)}/{history.Pet.Id}");
+        }
+
+        public async Task<IActionResult> EditHistory(int? id)
+        {
+            if (id == null)
+            {
+                return NotFound();
+            }
+
+            var history = await _dataContext.Histories
+                .Include(h => h.Pet)
+                .Include(h => h.ServiceType)
+                .FirstOrDefaultAsync(p => p.Id == id.Value);
+            if (history == null)
+            {
+                return NotFound();
+            }
+
+            var view = new HistoryViewModel
+            {
+                Date = history.Date,
+                Description = history.Description,
+                Id = history.Id,
+                PetId = history.Pet.Id,
+                Remarks = history.Remarks,
+                ServiceTypeId = history.ServiceType.Id,
+                ServiceTypes = _combosHelper.GetComboServiceTypes()
+            };
+
+            return View(view);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> EditHistory(HistoryViewModel view)
+        {
+            if (ModelState.IsValid)
+            {
+                var history = new History
+                {
+                    Date = view.Date,
+                    Description = view.Description,
+                    Id = view.Id,
+                    Pet = await _dataContext.Pets.FindAsync(view.PetId),
+                    Remarks = view.Remarks,
+                    ServiceType = await _dataContext.ServiceTypes.FindAsync(view.ServiceTypeId)
+                };
+
+                _dataContext.Histories.Update(history);
+                await _dataContext.SaveChangesAsync();
+                return RedirectToAction($"{nameof(Details)}/{view.PetId}");
+            }
+
+            return View(view);
+        }
+
+        public async Task<IActionResult> AddHistory(int? id)
+        {
+            if (id == null)
+            {
+                return NotFound();
+            }
+
+            var pet = await _dataContext.Pets.FindAsync(id.Value);
+            if (pet == null)
+            {
+                return NotFound();
+            }
+
+            var view = new HistoryViewModel
+            {
+                Date = DateTime.Now,
+                PetId = pet.Id,
+                ServiceTypes = _combosHelper.GetComboServiceTypes(),
+            };
+
+            return View(view);
+        }
+
+        [HttpPost]
+        public async Task<IActionResult> AddHistory(HistoryViewModel view)
+        {
+            if (ModelState.IsValid)
+            {
+                var history = new History
+                {
+                    Date = view.Date,
+                    Description = view.Description,
+                    Pet = await _dataContext.Pets.FindAsync(view.PetId),
+                    Remarks = view.Remarks,
+                    ServiceType = await _dataContext.ServiceTypes.FindAsync(view.ServiceTypeId)
+                };
+
+                _dataContext.Histories.Add(history);
+                await _dataContext.SaveChangesAsync();
+                return RedirectToAction($"{nameof(Details)}/{view.PetId}");
+            }
+
+            return View(view);
         }
     }
 }

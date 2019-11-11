@@ -391,7 +391,7 @@ namespace MyVet.Web.Migrations
                         .HasForeignKey("OwnerId");
 
                     b.HasOne("MyVet.Web.Data.Entities.Pet", "Pet")
-                        .WithMany()
+                        .WithMany("Agendas")
                         .HasForeignKey("PetId");
                 });
 
